@@ -1,3 +1,6 @@
+ARC_LCD_ base mini cluster for HYUNDAI GENESIS 2008~2013
+UI based LVGL, ESP32 MCU based.
+
 제 차량에는 어댑티브 스마트 크루즈 컨트롤이 있습니다.
 작동중일 시에 계기판에 작동상황을 이미지로 함께 보여주죠.
 ![genesis_scc_cluster](https://github.com/user-attachments/assets/fabd4b33-eb65-4711-8534-eb37cedda82c)
