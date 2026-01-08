@@ -18,8 +18,8 @@ extern "C" {
 #endif
 
 // ===== MCP2515 핀 정의 (앞에서 잡은 배선 기준) =====
-#define CAN_CS   5     // MCP2515 CS
-#define CAN_INT  27    // MCP2515 INT
+#define CAN_CS 5    // MCP2515 CS
+#define CAN_INT 27  // MCP2515 INT
 
 MCP_CAN CAN0(CAN_CS);
 
@@ -33,45 +33,44 @@ static lv_color_t buf1[240 * 20];
 static uint32_t last_ms = 0;
 
 // ===== timers =====
-static lv_timer_t* boot_timer   = nullptr;
+static lv_timer_t *boot_timer = nullptr;
 static bool g_ui_ready = false;
-static bool g_can_ok   = false;  // CAN이 정상 초기화되었는지 여부
+static bool g_can_ok = false;  // CAN이 정상 초기화되었는지 여부
 
 
 
 // ===== SCC state =====
 typedef enum {
-  SCC_OFF = 0,      // C1
-  SCC_READY,        // E1
-  SCC_ON,           // E9 (FOLLOWING)
-  SCC_OVERRIDE,     // F1 (운전자 가속 개입)
-  SCC_LS_CANCEL     // F9 (저속 해제)
+  SCC_OFF = 0,   // C1
+  SCC_READY,     // E1
+  SCC_ON,        // E9 (FOLLOWING)
+  SCC_OVERRIDE,  // F1 (운전자 가속 개입)
+  SCC_LS_CANCEL  // F9 (저속 해제)
 } scc_state_t;
 
-static scc_state_t decode_scc_state(uint8_t raw)
-{
+static scc_state_t decode_scc_state(uint8_t raw) {
   switch (raw) {
-    case 0xC1: return SCC_OFF;       // SYSTEM OFF
-    case 0xE1: return SCC_READY;     // READY
-    case 0xE9: return SCC_ON;        // FOLLOWING
-    case 0xF1: return SCC_OVERRIDE;  // OVERRIDE (운전자 가속)
-    case 0xF9: return SCC_LS_CANCEL; // LOW SPEED CANCEL
-    default:   return SCC_OFF;
+    case 0xC1: return SCC_OFF;        // SYSTEM OFF
+    case 0xE1: return SCC_READY;      // READY
+    case 0xE9: return SCC_ON;         // FOLLOWING
+    case 0xF1: return SCC_OVERRIDE;   // OVERRIDE (운전자 가속)
+    case 0xF9: return SCC_LS_CANCEL;  // LOW SPEED CANCEL
+    default: return SCC_OFF;
   }
 }
 
-static bool g_scc_override_visible    = true;   // 현재 보여주는 중인지
-static unsigned long g_scc_override_ms = 0;     // 마지막 토글 시각
+static bool g_scc_override_visible = true;   // 현재 보여주는 중인지
+static unsigned long g_scc_override_ms = 0;  // 마지막 토글 시각
 
 
 static scc_state_t g_scc_state = SCC_OFF;
 
 // ===== demo values (나중에 CAN 값으로 교체) =====
-static int g_speed_kph   = 0;
-static int g_coolant_c   = 85;
+static int g_speed_kph = 0;
+static int g_coolant_c = 85;
 static int g_scc_set_kph = 120;
-static int  g_scc_dist_level = 2;     // 1~3
-static bool g_scc_lead_car    = false; // false=전방차량 없음, true=있음
+static int g_scc_dist_level = 2;     // 1~3
+static bool g_scc_lead_car = false;  // false=전방차량 없음, true=있음
 
 // ================= Display flush =================
 void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p) {
@@ -80,7 +79,7 @@ void my_disp_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color
 
   tft.startWrite();
   tft.setAddrWindow(area->x1, area->y1, w, h);
-  tft.pushColors((uint16_t*)color_p, w * h, true);
+  tft.pushColors((uint16_t *)color_p, w * h, true);
   tft.endWrite();
 
   lv_disp_flush_ready(disp);
@@ -102,51 +101,67 @@ static const lv_coord_t SPD_NORMAL_X = 0;
 static const lv_coord_t SPD_NORMAL_Y = 0;
 static const lv_coord_t KMH_NORMAL_X = 0;
 static const lv_coord_t KMH_NORMAL_Y = 40;
-static const lv_coord_t AH_NORMAL_X  = 65;
-static const lv_coord_t AH_NORMAL_Y  = 0;
+static const lv_coord_t AH_NORMAL_X = 65;
+static const lv_coord_t AH_NORMAL_Y = 0;
 
 static const lv_coord_t SPD_SCC_X = 0;
 static const lv_coord_t SPD_SCC_Y = 80;
 static const lv_coord_t KMH_SCC_X = 0;
 static const lv_coord_t KMH_SCC_Y = 105;
-static const lv_coord_t AH_SCC_X  = 46;
-static const lv_coord_t AH_SCC_Y  = 80;
+static const lv_coord_t AH_SCC_X = 46;
+static const lv_coord_t AH_SCC_Y = 80;
+
+// ---- Translate deltas (NORMAL -> SCC) ----
+// 기존 절대좌표 상수로부터 "이동량"을 계산
+static const lv_coord_t SPD_TX_SCC = (SPD_SCC_X - SPD_NORMAL_X);
+static const lv_coord_t SPD_TY_SCC = (SPD_SCC_Y - SPD_NORMAL_Y);
+
+static const lv_coord_t KMH_TX_SCC = (KMH_SCC_X - KMH_NORMAL_X);
+static const lv_coord_t KMH_TY_SCC = (KMH_SCC_Y - KMH_NORMAL_Y);
+
+static const lv_coord_t AH_TX_SCC = (AH_SCC_X - AH_NORMAL_X);
+static const lv_coord_t AH_TY_SCC = (AH_SCC_Y - AH_NORMAL_Y);
+
 
 // ---- Timing ----
 static const uint16_t TRANS_MOVE_MS = 320;
 static const uint16_t TRANS_FADE_MS = 220;
 
 // ---- Exec callbacks ----
-static void anim_exec_set_x(void * var, int32_t v) { lv_obj_set_x((lv_obj_t *)var, (lv_coord_t)v); }
-static void anim_exec_set_y(void * var, int32_t v) { lv_obj_set_y((lv_obj_t *)var, (lv_coord_t)v); }
-static void anim_exec_set_opa(void * var, int32_t v) {
+static void anim_exec_set_tx(void *var, int32_t v) {
+  lv_obj_set_style_translate_x((lv_obj_t *)var, (lv_coord_t)v, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+static void anim_exec_set_ty(void *var, int32_t v) {
+  lv_obj_set_style_translate_y((lv_obj_t *)var, (lv_coord_t)v, LV_PART_MAIN | LV_STATE_DEFAULT);
+}
+
+static void anim_exec_set_opa(void *var, int32_t v) {
   lv_obj_set_style_opa((lv_obj_t *)var, (lv_opa_t)v, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
 // Arc용: 기본적으로 MAIN/INDICATOR/KNOB를 함께 페이드
-static void anim_exec_set_arc_opa(void * var, int32_t v) {
-  lv_obj_t * o = (lv_obj_t *)var;
+static void anim_exec_set_arc_opa(void *var, int32_t v) {
+  lv_obj_t *o = (lv_obj_t *)var;
   lv_obj_set_style_opa(o, (lv_opa_t)v, LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_arc_opa(o, (lv_opa_t)v, LV_PART_INDICATOR | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(o, (lv_opa_t)v, LV_PART_KNOB | LV_STATE_DEFAULT);
 }
 
 // SCCArcON용: MAIN은 0~100까지만(기존 디자인 유지), INDICATOR/KNOB는 0~255
-static void anim_exec_set_scc_arc_opa(void * var, int32_t v) {
-  lv_obj_t * o = (lv_obj_t *)var;
+static void anim_exec_set_scc_arc_opa(void *var, int32_t v) {
+  lv_obj_t *o = (lv_obj_t *)var;
   int32_t main_opa = (v * 100) / 255;
   lv_obj_set_style_opa(o, (lv_opa_t)main_opa, LV_PART_MAIN | LV_STATE_DEFAULT);
   lv_obj_set_style_arc_opa(o, (lv_opa_t)v, LV_PART_INDICATOR | LV_STATE_DEFAULT);
   lv_obj_set_style_bg_opa(o, (lv_opa_t)v, LV_PART_KNOB | LV_STATE_DEFAULT);
 }
 
-static void start_anim(void * var,
+static void start_anim(void *var,
                        lv_anim_exec_xcb_t exec_cb,
                        int32_t from, int32_t to,
                        uint16_t time_ms, uint16_t delay_ms,
                        lv_anim_ready_cb_t ready_cb,
-                       void * user_data)
-{
+                       void *user_data) {
   lv_anim_del(var, exec_cb);
 
   lv_anim_t a;
@@ -163,13 +178,12 @@ static void start_anim(void * var,
 }
 
 typedef struct {
-  lv_obj_t * obj;
+  lv_obj_t *obj;
   bool hide_on_done;
 } anim_hide_ud_t;
 
-static void anim_hide_ready_cb(lv_anim_t * a)
-{
-  anim_hide_ud_t * ud = (anim_hide_ud_t *)a->user_data;
+static void anim_hide_ready_cb(lv_anim_t *a) {
+  anim_hide_ud_t *ud = (anim_hide_ud_t *)a->user_data;
   if (ud) {
     if (ud->hide_on_done && ud->obj) {
       lv_obj_add_flag(ud->obj, LV_OBJ_FLAG_HIDDEN);
@@ -179,16 +193,15 @@ static void anim_hide_ready_cb(lv_anim_t * a)
   }
 }
 
-static void fade_show_obj(lv_obj_t * obj, bool is_arc, bool is_scc_arc)
-{
+static void fade_show_obj(lv_obj_t *obj, bool is_arc, bool is_scc_arc) {
   if (!obj) return;
 
   lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
 
   // 초기 투명
-  if (is_scc_arc)       anim_exec_set_scc_arc_opa(obj, 0);
-  else if (is_arc)      anim_exec_set_arc_opa(obj, 0);
-  else                  anim_exec_set_opa(obj, 0);
+  if (is_scc_arc) anim_exec_set_scc_arc_opa(obj, 0);
+  else if (is_arc) anim_exec_set_arc_opa(obj, 0);
+  else anim_exec_set_opa(obj, 0);
 
   // 페이드 인
   start_anim(obj,
@@ -200,13 +213,12 @@ static void fade_show_obj(lv_obj_t * obj, bool is_arc, bool is_scc_arc)
              NULL, NULL);
 }
 
-static void fade_hide_obj(lv_obj_t * obj, bool is_arc, bool is_scc_arc)
-{
+static void fade_hide_obj(lv_obj_t *obj, bool is_arc, bool is_scc_arc) {
   if (!obj) return;
 
   lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);  // 숨김 상태면 페이드가 안 보이므로 먼저 해제
 
-  anim_hide_ud_t * ud = (anim_hide_ud_t *)lv_mem_alloc(sizeof(anim_hide_ud_t));
+  anim_hide_ud_t *ud = (anim_hide_ud_t *)lv_mem_alloc(sizeof(anim_hide_ud_t));
   if (!ud) {
     // 메모리 부족 시 즉시 숨김
     lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -224,107 +236,118 @@ static void fade_hide_obj(lv_obj_t * obj, bool is_arc, bool is_scc_arc)
              anim_hide_ready_cb, ud);
 }
 
-static void move_obj_to(lv_obj_t * obj, lv_coord_t x_to, lv_coord_t y_to, uint16_t time_ms,
-                        lv_anim_ready_cb_t y_ready_cb, void * y_user_data)
-{
+static void move_obj_translate_to(lv_obj_t *obj,
+                                  lv_coord_t tx_to, lv_coord_t ty_to,
+                                  uint16_t time_ms,
+                                  lv_anim_ready_cb_t ty_ready_cb,
+                                  void *ty_user_data) {
   if (!obj) return;
 
-  lv_coord_t x_from = lv_obj_get_x(obj);
-  lv_coord_t y_from = lv_obj_get_y(obj);
+  lv_coord_t tx_from = lv_obj_get_style_translate_x(obj, LV_PART_MAIN | LV_STATE_DEFAULT);
+  lv_coord_t ty_from = lv_obj_get_style_translate_y(obj, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-  if (x_from != x_to) {
-    start_anim(obj, (lv_anim_exec_xcb_t)anim_exec_set_x,
-               x_from, x_to,
+  if (tx_from != tx_to) {
+    start_anim(obj, (lv_anim_exec_xcb_t)anim_exec_set_tx,
+               tx_from, tx_to,
                time_ms, 0,
                NULL, NULL);
   }
 
-  if (y_from != y_to) {
-    start_anim(obj, (lv_anim_exec_xcb_t)anim_exec_set_y,
-               y_from, y_to,
+  if (ty_from != ty_to) {
+    start_anim(obj, (lv_anim_exec_xcb_t)anim_exec_set_ty,
+               ty_from, ty_to,
                time_ms, 0,
-               y_ready_cb, y_user_data);
+               ty_ready_cb, ty_user_data);
   } else {
-    // y 변화가 없을 때도 후처리가 필요하면 즉시 호출
-    if (y_ready_cb) {
+    if (ty_ready_cb) {
       lv_anim_t dummy;
-      dummy.user_data = y_user_data;
-      y_ready_cb(&dummy);
+      dummy.user_data = ty_user_data;
+      ty_ready_cb(&dummy);
     }
   }
 }
 
-static bool is_scc_layout_state(scc_state_t st)
-{
+
+static bool is_scc_layout_state(scc_state_t st) {
   return (st != SCC_OFF);
 }
 
-static void set_main_text_fonts_scc(void)
-{
-  if (ui_speedlabel)        lv_obj_set_style_text_font(ui_speedlabel,        &lv_font_montserrat_32, LV_PART_MAIN);
-  if (ui_kmhtext)           lv_obj_set_style_text_font(ui_kmhtext,           &lv_font_montserrat_10, LV_PART_MAIN);
-  if (ui_autoholdindicator) lv_obj_set_style_text_font(ui_autoholdindicator, &lv_font_montserrat_8,  LV_PART_MAIN);
+static void set_main_text_fonts_scc(void) {
+  if (ui_speedlabel) lv_obj_set_style_text_font(ui_speedlabel, &lv_font_montserrat_32, LV_PART_MAIN);
+  if (ui_kmhtext) lv_obj_set_style_text_font(ui_kmhtext, &lv_font_montserrat_10, LV_PART_MAIN);
+  if (ui_autoholdindicator) lv_obj_set_style_text_font(ui_autoholdindicator, &lv_font_montserrat_8, LV_PART_MAIN);
 }
 
-static void set_main_text_fonts_normal(void)
-{
-  if (ui_speedlabel)        lv_obj_set_style_text_font(ui_speedlabel,        &lv_font_montserrat_48, LV_PART_MAIN);
-  if (ui_kmhtext)           lv_obj_set_style_text_font(ui_kmhtext,           &lv_font_montserrat_14, LV_PART_MAIN);
+static void set_main_text_fonts_normal(void) {
+  if (ui_speedlabel) lv_obj_set_style_text_font(ui_speedlabel, &lv_font_montserrat_48, LV_PART_MAIN);
+  if (ui_kmhtext) lv_obj_set_style_text_font(ui_kmhtext, &lv_font_montserrat_14, LV_PART_MAIN);
   if (ui_autoholdindicator) lv_obj_set_style_text_font(ui_autoholdindicator, &lv_font_montserrat_10, LV_PART_MAIN);
 }
 
-static void speed_to_normal_ready_cb(lv_anim_t * a)
-{
+
+
+static void speed_to_normal_ready_cb(lv_anim_t *a) {
   (void)a;
   // 위치 애니메이션이 끝난 뒤 폰트만 정상 상태로 복귀(점프 최소화)
   set_main_text_fonts_normal();
 }
 
-static void transition_to_scc_layout(bool to_scc)
+
+static void speed_to_scc_ready_cb(lv_anim_t *a) {
+  (void)a;
+  // SCC 진입 이동이 끝난 뒤 폰트 변경
+  set_main_text_fonts_scc();
+}
+
+
+static void transition_to_scc_layout(bool to_scc) 
 {
-  // 이동(속도 객체 묶음)
   if (to_scc) {
-    set_main_text_fonts_scc();
-    move_obj_to(ui_speedlabel,        SPD_SCC_X, SPD_SCC_Y, TRANS_MOVE_MS, NULL, NULL);
-    move_obj_to(ui_kmhtext,           KMH_SCC_X, KMH_SCC_Y, TRANS_MOVE_MS, NULL, NULL);
-    move_obj_to(ui_autoholdindicator, AH_SCC_X,  AH_SCC_Y,  TRANS_MOVE_MS, NULL, NULL);
-  } else {
-    // 폰트는 이동 후 복귀
-    move_obj_to(ui_speedlabel,        SPD_NORMAL_X, SPD_NORMAL_Y, TRANS_MOVE_MS, speed_to_normal_ready_cb, NULL);
-    move_obj_to(ui_kmhtext,           KMH_NORMAL_X, KMH_NORMAL_Y, TRANS_MOVE_MS, NULL, NULL);
-    move_obj_to(ui_autoholdindicator, AH_NORMAL_X,  AH_NORMAL_Y,  TRANS_MOVE_MS, NULL, NULL);
-  }
-
-  // SCC 객체: 페이드 인/아웃
-  if (to_scc) {
-    fade_show_obj(ui_SCCsettext,       false, false);
-    fade_show_obj(ui_SCCsetspeedlabel, false, false);
-    fade_show_obj(ui_SCCkmhtext,       false, false);
-    fade_show_obj(ui_SCCimg,           false, false);
-
-    // SCCArcON은 디자인 유지용 전용 페이드
-    fade_show_obj(ui_SCCArcON,         true,  true);
-
-    // Coolant는 사라짐
-    fade_hide_obj(ui_Arccoolant, true,  false);
-    fade_hide_obj(ui_coolantimg, false, false);
-
-    // Gear는 NORMAL에서만
-    if (ui_gearlabel) lv_obj_add_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
+    // 폰트는 이동 후에 적용(점프/줌 느낌 최소화)
+    move_obj_translate_to(ui_speedlabel, SPD_TX_SCC, SPD_TY_SCC, TRANS_MOVE_MS, speed_to_scc_ready_cb, NULL);
+    move_obj_translate_to(ui_kmhtext, KMH_TX_SCC, KMH_TY_SCC, TRANS_MOVE_MS, NULL, NULL);
+    move_obj_translate_to(ui_autoholdindicator, AH_TX_SCC, AH_TY_SCC, TRANS_MOVE_MS, NULL, NULL);
 
   } else {
-    fade_hide_obj(ui_SCCsettext,       false, false);
-    fade_hide_obj(ui_SCCsetspeedlabel, false, false);
-    fade_hide_obj(ui_SCCkmhtext,       false, false);
-    fade_hide_obj(ui_SCCimg,           false, false);
-    fade_hide_obj(ui_SCCArcON,         true,  true);
-
-    // Coolant는 다시 나타남
-    fade_show_obj(ui_Arccoolant, true,  false);
-    fade_show_obj(ui_coolantimg, false, false);
-
-    if (ui_gearlabel) lv_obj_clear_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
+    // NORMAL 복귀: translate를 0으로
+    move_obj_translate_to(ui_speedlabel, 0, 0, TRANS_MOVE_MS, speed_to_normal_ready_cb, NULL);
+    move_obj_translate_to(ui_kmhtext, 0, 0, TRANS_MOVE_MS, NULL, NULL);
+    move_obj_translate_to(ui_autoholdindicator, 0, 0, TRANS_MOVE_MS, NULL, NULL);
   }
+
+
+
+
+// SCC 객체: 페이드 인/아웃
+if (to_scc) {
+  fade_show_obj(ui_SCCsettext, false, false);
+  fade_show_obj(ui_SCCsetspeedlabel, false, false);
+  fade_show_obj(ui_SCCkmhtext, false, false);
+  fade_show_obj(ui_SCCimg, false, false);
+
+  // SCCArcON은 디자인 유지용 전용 페이드
+  fade_show_obj(ui_SCCArcON, true, true);
+
+  // Coolant는 사라짐
+  fade_hide_obj(ui_Arccoolant, true, false);
+  fade_hide_obj(ui_coolantimg, false, false);
+
+  // Gear는 NORMAL에서만
+  if (ui_gearlabel) lv_obj_add_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
+
+} else {
+  fade_hide_obj(ui_SCCsettext, false, false);
+  fade_hide_obj(ui_SCCsetspeedlabel, false, false);
+  fade_hide_obj(ui_SCCkmhtext, false, false);
+  fade_hide_obj(ui_SCCimg, false, false);
+  fade_hide_obj(ui_SCCArcON, true, true);
+
+  // Coolant는 다시 나타남
+  fade_show_obj(ui_Arccoolant, true, false);
+  fade_show_obj(ui_coolantimg, false, false);
+
+  if (ui_gearlabel) lv_obj_clear_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
+}
 }
 
 // ================= Speed UI =================
@@ -343,9 +366,9 @@ static void set_coolant(int coolant_c) {
   lv_arc_set_value(ui_Arccoolant, coolant_c);
 
   lv_color_t col;
-  if (coolant_c >= 105)      col = lv_color_hex(0xFF3B30); // red
-  else if (coolant_c >= 100) col = lv_color_hex(0xFFCC00); // yellow
-  else                       col = lv_color_hex(0x2BCC30); // green
+  if (coolant_c >= 105) col = lv_color_hex(0xFF3B30);       // red
+  else if (coolant_c >= 100) col = lv_color_hex(0xFFCC00);  // yellow
+  else col = lv_color_hex(0x2BCC30);                        // green
 
   lv_obj_set_style_arc_color(ui_Arccoolant, col, LV_PART_INDICATOR | LV_STATE_DEFAULT);
 }
@@ -366,8 +389,7 @@ static void scc_update_set_speed(int set_kph) {
 }
 
 // ================= SCC: text color (arc 제외) =================
-static void scc_set_text_color_by_state(scc_state_t state)
-{
+static void scc_set_text_color_by_state(scc_state_t state) {
   lv_color_t color;
 
   switch (state) {
@@ -379,8 +401,8 @@ static void scc_set_text_color_by_state(scc_state_t state)
     case SCC_ON:
     case SCC_OVERRIDE:
       // ON + OVERRIDE: 살짝 어두운 초록
-        color = lv_color_hex(0x00CC33);
-        break;
+      color = lv_color_hex(0x00CC33);
+      break;
 
 
     case SCC_LS_CANCEL:
@@ -408,39 +430,36 @@ static void scc_set_text_color_by_state(scc_state_t state)
 
 
 static void scc_set_visible(scc_state_t state) {
-  bool scc_visible  = (state != SCC_OFF);
+  bool scc_visible = (state != SCC_OFF);
 
   // READY / ON / OVERRIDE / LOW SPEED CANCEL 은 모두 쿨런트 숨김
-  bool hide_coolant = (state == SCC_READY ||
-                       state == SCC_ON    ||
-                       state == SCC_OVERRIDE ||
-                       state == SCC_LS_CANCEL);
+  bool hide_coolant = (state == SCC_READY || state == SCC_ON || state == SCC_OVERRIDE || state == SCC_LS_CANCEL);
 
   // 기어 표시는 NORMAL(SCC_OFF)에서만
   bool show_gear = (state == SCC_OFF);
 
   // --- SCC 그룹 표시/숨김 ---
   if (scc_visible) {
-    lv_obj_clear_flag(ui_SCCsettext,       LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_SCCsettext, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(ui_SCCsetspeedlabel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ui_SCCkmhtext,       LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ui_SCCArcON,         LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_SCCkmhtext, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_SCCArcON, LV_OBJ_FLAG_HIDDEN);
     if (ui_SCCimg) lv_obj_clear_flag(ui_SCCimg, LV_OBJ_FLAG_HIDDEN);
   } else {
-    lv_obj_add_flag(ui_SCCsettext,       LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_SCCsettext, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(ui_SCCsetspeedlabel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_SCCkmhtext,       LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_SCCArcON,         LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_SCCkmhtext, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_SCCArcON, LV_OBJ_FLAG_HIDDEN);
     if (ui_SCCimg) lv_obj_add_flag(ui_SCCimg, LV_OBJ_FLAG_HIDDEN);
   }
 
   // --- Coolant 게이지/아이콘 표시/숨김 ---
   if (hide_coolant) {
-    lv_obj_add_flag(ui_Arccoolant,  LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(ui_coolantimg,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_Arccoolant, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(ui_coolantimg, LV_OBJ_FLAG_HIDDEN);
   } else {
-    lv_obj_clear_flag(ui_Arccoolant,  LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ui_coolantimg,  LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_Arccoolant, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(ui_coolantimg, LV_OBJ_FLAG_HIDDEN);
   }
 
   // --- Gear 라벨 표시/숨김 ---
@@ -448,7 +467,7 @@ static void scc_set_visible(scc_state_t state) {
     if (show_gear) {
       lv_obj_clear_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
     } else {
-      lv_obj_add_flag(ui_gearlabel,   LV_OBJ_FLAG_HIDDEN);
+      lv_obj_add_flag(ui_gearlabel, LV_OBJ_FLAG_HIDDEN);
     }
   }
 }
@@ -459,57 +478,54 @@ static void scc_set_visible(scc_state_t state) {
 // color: 0 = READY, 1 = ON
 // lead_car: 0 = 없음, 1 = 있음
 // dist: 0,1,2 => d1,d2,d3
-static const lv_img_dsc_t* SCC_IMG[2][2][3] = {
-    // READY
-    {
-        { &ui_img_scc_rdy_car0_d1, &ui_img_scc_rdy_car0_d2, &ui_img_scc_rdy_car0_d3 },
-        { &ui_img_scc_rdy_car1_d1, &ui_img_scc_rdy_car1_d2, &ui_img_scc_rdy_car1_d3 },
-    },
-    // ON
-    {
-        { &ui_img_scc_on_car0_d1, &ui_img_scc_on_car0_d2, &ui_img_scc_on_car0_d3 },
-        { &ui_img_scc_on_car1_d1, &ui_img_scc_on_car1_d2, &ui_img_scc_on_car1_d3 },
-    }
+static const lv_img_dsc_t *SCC_IMG[2][2][3] = {
+  // READY
+  {
+    { &ui_img_scc_rdy_car0_d1, &ui_img_scc_rdy_car0_d2, &ui_img_scc_rdy_car0_d3 },
+    { &ui_img_scc_rdy_car1_d1, &ui_img_scc_rdy_car1_d2, &ui_img_scc_rdy_car1_d3 },
+  },
+  // ON
+  {
+    { &ui_img_scc_on_car0_d1, &ui_img_scc_on_car0_d2, &ui_img_scc_on_car0_d3 },
+    { &ui_img_scc_on_car1_d1, &ui_img_scc_on_car1_d2, &ui_img_scc_on_car1_d3 },
+  }
 };
 
 // SCC 상태/거리/전방차량에 맞춰 ui_SCCimg 갱신
-static void scc_update_image(void)
-{
-    if (!ui_SCCimg) return;
+static void scc_update_image(void) {
+  if (!ui_SCCimg) return;
 
-    // 가시성(숨김/표시)은 scc_set_visible()/transition에서 담당
-    if (g_scc_state == SCC_OFF) {
-        return;
-    }
+  // 가시성(숨김/표시)은 scc_set_visible()/transition에서 담당
+  if (g_scc_state == SCC_OFF) {
+    return;
+  }
 
-    int color_idx = (g_scc_state == SCC_ON || g_scc_state == SCC_OVERRIDE) ? 1 : 0;
-    // READY / LS_CANCEL 등 → 0(회색 세트), ON / OVERRIDE → 1(초록 세트)
+  int color_idx = (g_scc_state == SCC_ON || g_scc_state == SCC_OVERRIDE) ? 1 : 0;
+  // READY / LS_CANCEL 등 → 0(회색 세트), ON / OVERRIDE → 1(초록 세트)
 
-    int car_idx   = g_scc_lead_car ? 1 : 0;               // 0=없음, 1=있음
-    int dist_idx  = clampi(g_scc_dist_level, 1, 3) - 1;   // 0~2
+  int car_idx = g_scc_lead_car ? 1 : 0;               // 0=없음, 1=있음
+  int dist_idx = clampi(g_scc_dist_level, 1, 3) - 1;  // 0~2
 
-    const lv_img_dsc_t* img = SCC_IMG[color_idx][car_idx][dist_idx];
-    lv_img_set_src(ui_SCCimg, img);
+  const lv_img_dsc_t *img = SCC_IMG[color_idx][car_idx][dist_idx];
+  lv_img_set_src(ui_SCCimg, img);
 }
 
-static void scc_set_text_blink_visible(bool visible)
-{
+static void scc_set_text_blink_visible(bool visible) {
   if (ui_SCCsettext) {
     if (visible) lv_obj_clear_flag(ui_SCCsettext, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_add_flag(ui_SCCsettext,   LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui_SCCsettext, LV_OBJ_FLAG_HIDDEN);
   }
   if (ui_SCCsetspeedlabel) {
     if (visible) lv_obj_clear_flag(ui_SCCsetspeedlabel, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_add_flag(ui_SCCsetspeedlabel,   LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui_SCCsetspeedlabel, LV_OBJ_FLAG_HIDDEN);
   }
   if (ui_SCCkmhtext) {
     if (visible) lv_obj_clear_flag(ui_SCCkmhtext, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_add_flag(ui_SCCkmhtext,   LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(ui_SCCkmhtext, LV_OBJ_FLAG_HIDDEN);
   }
 }
 
-static void scc_override_blink_task(void)
-{
+static void scc_override_blink_task(void) {
   // OVERRIDE가 아니면 항상 켜진 상태로 복귀
   if (g_scc_state != SCC_OVERRIDE) {
     if (!g_scc_override_visible) {
@@ -532,14 +548,10 @@ static void scc_override_blink_task(void)
 
 
 // ================= Main text layout by SCC state =================
-static void apply_main_text_layout_by_scc_state(scc_state_t state)
-{
+static void apply_main_text_layout_by_scc_state(scc_state_t state) {
   if (!ui_speedlabel || !ui_kmhtext || !ui_autoholdindicator) return;
 
-  bool scc_layout = (state == SCC_READY ||
-                     state == SCC_ON    ||
-                     state == SCC_OVERRIDE ||
-                     state == SCC_LS_CANCEL);
+  bool scc_layout = (state == SCC_READY || state == SCC_ON || state == SCC_OVERRIDE || state == SCC_LS_CANCEL);
 
   if (scc_layout) {
     // ===== READY/ON 공통 레이아웃 (사용자 기록값) =====
@@ -572,29 +584,27 @@ static void apply_main_text_layout_by_scc_state(scc_state_t state)
 // ================= Gear (PRND) 표시 =================
 
 // 디바운스용 상태
-static uint8_t g_gear_raw_last       = 0xFF;  // 마지막으로 관측된 raw 값
-static uint8_t g_gear_raw_stable     = 0x40;  // 안정된(raw 확정) 값 (기본 P로 시작)
-static uint8_t g_gear_same_count     = 0;     // 같은 값이 연속으로 몇 번 들어왔는지
+static uint8_t g_gear_raw_last = 0xFF;    // 마지막으로 관측된 raw 값
+static uint8_t g_gear_raw_stable = 0x40;  // 안정된(raw 확정) 값 (기본 P로 시작)
+static uint8_t g_gear_same_count = 0;     // 같은 값이 연속으로 몇 번 들어왔는지
 
 // raw(Byte1) -> 표시 문자열 변환
-static const char* gear_text_from_raw(uint8_t raw)
-{
+static const char *gear_text_from_raw(uint8_t raw) {
   switch (raw) {
     case 0x40: return "P";  // Park
     case 0x47: return "R";  // Reverse
     case 0x46: return "N";  // Neutral
     case 0x45: return "D";  // Drive
-    default:   return "-";  // 정의되지 않은 값
+    default: return "-";    // 정의되지 않은 값
   }
 }
 
 // 디바운스 포함 업데이트
 // ================= PRND 기어 표시 (디바운스 없이 즉시 반영) =================
-static void gear_update_from_byte1(uint8_t raw)
-{
-  if (!ui_gearlabel) return;   // 라벨 포인터 이름이 다르면 여기 맞춰서 수정
+static void gear_update_from_byte1(uint8_t raw) {
+  if (!ui_gearlabel) return;  // 라벨 포인터 이름이 다르면 여기 맞춰서 수정
 
-  const char* gear_text = "";
+  const char *gear_text = "";
 
   switch (raw) {
     case 0x40:  // P
@@ -628,7 +638,7 @@ static void set_scc_state(scc_state_t new_state) {
 
   scc_state_t prev = g_scc_state;
   bool prev_layout = is_scc_layout_state(prev);
-  bool new_layout  = is_scc_layout_state(new_state);
+  bool new_layout = is_scc_layout_state(new_state);
 
   g_scc_state = new_state;
 
@@ -667,11 +677,11 @@ static void set_scc_state(scc_state_t new_state) {
 }
 
 // ================= Boot animation timer =================
-static void boot_timer_cb(lv_timer_t* t) {
+static void boot_timer_cb(lv_timer_t *t) {
   (void)t;
   static int p = 0;
 
-  p += 2; // 0->100 속도
+  p += 2;  // 0->100 속도
   if (p > 100) p = 100;
 
   lv_bar_set_value(ui_loadingbar, p, LV_ANIM_OFF);
@@ -695,17 +705,15 @@ static void boot_timer_cb(lv_timer_t* t) {
     // 시작 상태 반영(원하면 SCC_READY로 시작 등 변경 가능)
     set_scc_state(g_scc_state);
 
-     // UI 준비 완료 플래그
+    // UI 준비 완료 플래그
     g_ui_ready = true;
-
   }
 }
 
 
 // ================= CAN 수신 → UI 반영 =================
 // ================= CAN 수신 → UI 반영 =================
-static void read_can_and_update_ui()
-{
+static void read_can_and_update_ui() {
   // 한 루프에 최대 5개까지 처리 (필요하면 숫자 조정 가능)
   for (int n = 0; n < 5; ++n) {
     if (CAN0.checkReceive() != CAN_MSGAVAIL) break;
@@ -719,96 +727,100 @@ static void read_can_and_update_ui()
     switch (canId) {
 
       // ===== 0x420: SCC 상태 / 세트속도 / 거리 / 전방차량 =====
-      case 0x420: {
-        if (len < 7) break;
+      case 0x420:
+        {
+          if (len < 7) break;
 
-        uint8_t raw_state = buf[0];
-        uint8_t raw_set   = buf[5];
-        uint8_t d6        = buf[6];
+          uint8_t raw_state = buf[0];
+          uint8_t raw_set = buf[5];
+          uint8_t d6 = buf[6];
 
-        // 상태 디코딩
-        scc_state_t st = decode_scc_state(raw_state);
-        set_scc_state(st);   // 가시성/색/레이아웃/SCC 이미지 기본 처리
+          // 상태 디코딩
+          scc_state_t st = decode_scc_state(raw_state);
+          set_scc_state(st);  // 가시성/색/레이아웃/SCC 이미지 기본 처리
 
-        // 세트속도 (raw 그대로 km/h)
-        g_scc_set_kph = raw_set;
-        scc_update_set_speed(g_scc_set_kph);
+          // 세트속도 (raw 그대로 km/h)
+          g_scc_set_kph = raw_set;
+          scc_update_set_speed(g_scc_set_kph);
 
-        // 거리 단계 (상위 4비트, 1~3)
-        int dist = (d6 >> 4) & 0x0F;
-        if (dist < 1 || dist > 3) dist = 2;   // 이상값 나오면 가운데(2)
-        g_scc_dist_level = dist;
+          // 거리 단계 (상위 4비트, 1~3)
+          int dist = (d6 >> 4) & 0x0F;
+          if (dist < 1 || dist > 3) dist = 2;  // 이상값 나오면 가운데(2)
+          g_scc_dist_level = dist;
 
-        // 전방차량 유무 (하위 4비트: 0x0D = 있음, 0x0C = 없음)
-        uint8_t lowNib = d6 & 0x0F;
-        g_scc_lead_car = (lowNib == 0x0D);
+          // 전방차량 유무 (하위 4비트: 0x0D = 있음, 0x0C = 없음)
+          uint8_t lowNib = d6 & 0x0F;
+          g_scc_lead_car = (lowNib == 0x0D);
 
-        // 거리/전방차량에 맞춰 이미지 갱신
-        scc_update_image();
-        break;
-      }
+          // 거리/전방차량에 맞춰 이미지 갱신
+          scc_update_image();
+          break;
+        }
 
       // ===== 0x0A0: 속도 + 냉각수 (최유력 후보) =====
-      case 0x0A0: {
-        // 속도: B4 → km/h (이미 1세대에서 검증했던 바이트)
-        if (len >= 5) {
-          uint8_t raw_speed = buf[4];   // B4
-          g_speed_kph = raw_speed;
-          set_speed(g_speed_kph);
-        }
+      case 0x0A0:
+        {
+          // 속도: B4 → km/h (이미 1세대에서 검증했던 바이트)
+          if (len >= 5) {
+            uint8_t raw_speed = buf[4];  // B4
+            g_speed_kph = raw_speed;
+            set_speed(g_speed_kph);
+          }
 
-        // 냉각수: Byte1 - 40 (확정 식)
-        if (len >= 2) {
-          uint8_t raw_clt = buf[1];     // Byte1
-          int coolant_c = (int)raw_clt - 40;   // CLT[°C] = raw - 40
-          g_coolant_c = coolant_c;
-          set_coolant(g_coolant_c);
+          // 냉각수: Byte1 - 40 (확정 식)
+          if (len >= 2) {
+            uint8_t raw_clt = buf[1];           // Byte1
+            int coolant_c = (int)raw_clt - 40;  // CLT[°C] = raw - 40
+            g_coolant_c = coolant_c;
+            set_coolant(g_coolant_c);
+          }
+          break;
         }
-        break;
-      }
 
       // ===== 0x47F: AutoHold 상태 =====
-      case 0x47F: {
-        if (len >= 2 && ui_autoholdindicator) {
-          uint8_t b0 = buf[0];
-          uint8_t b1 = buf[1];
+      case 0x47F:
+        {
+          if (len >= 2 && ui_autoholdindicator) {
+            uint8_t b0 = buf[0];
+            uint8_t b1 = buf[1];
 
-          // ON 여부: 00(주행 ON 대기), 01(정차 ON 작동)
-          bool ah_on     = (b1 == 0x00 || b1 == 0x01);
-          // 작동 여부: 정차 ON(01) 또는 ABS가 압 유지(b0 == 0x11)
-          bool ah_active = (b1 == 0x01) || (b0 == 0x11);
+            // ON 여부: 00(주행 ON 대기), 01(정차 ON 작동)
+            bool ah_on = (b1 == 0x00 || b1 == 0x01);
+            // 작동 여부: 정차 ON(01) 또는 ABS가 압 유지(b0 == 0x11)
+            bool ah_active = (b1 == 0x01) || (b0 == 0x11);
 
-          if (!ah_on) {
-            // AutoHold OFF → 표시 숨김
-            lv_label_set_text(ui_autoholdindicator, "");
-          } else {
-            // ON 상태: 항상 "AUTO / HOLD" 두 줄 표시
-            lv_label_set_text(ui_autoholdindicator, "AUTO\nHOLD");
+            if (!ah_on) {
+              // AutoHold OFF → 표시 숨김
+              lv_label_set_text(ui_autoholdindicator, "");
+            } else {
+              // ON 상태: 항상 "AUTO / HOLD" 두 줄 표시
+              lv_label_set_text(ui_autoholdindicator, "AUTO\nHOLD");
 
-            // 색상: 대기=검정, 작동중=초록
-            lv_color_t col = ah_active
-                ? lv_color_hex(0x00C040)   // 작동중: 초록
-                : lv_color_hex(0x000000);  // ON 대기: 검정 (나이트모드 나중에 조정)
+              // 색상: 대기=검정, 작동중=초록
+              lv_color_t col = ah_active
+                                 ? lv_color_hex(0x00C040)   // 작동중: 초록
+                                 : lv_color_hex(0x000000);  // ON 대기: 검정 (나이트모드 나중에 조정)
 
-            lv_obj_set_style_text_color(ui_autoholdindicator,
-                                        col,
-                                        LV_PART_MAIN | LV_STATE_DEFAULT);
+              lv_obj_set_style_text_color(ui_autoholdindicator,
+                                          col,
+                                          LV_PART_MAIN | LV_STATE_DEFAULT);
+            }
           }
+          break;
         }
-        break;
-      }
 
       // ===== 0x1087: PRND 기어 위치 =====
-      case 0x1087: {
-        if (len >= 2) {
-          uint8_t raw_gear = buf[1];  // Byte1 기준 (40=P, 47=R, 46=N, 45=D)
-          // 디버그용: 값 확인
-          // Serial.print("GEAR raw = 0x"); Serial.println(raw_gear, HEX);
+      case 0x1087:
+        {
+          if (len >= 2) {
+            uint8_t raw_gear = buf[1];  // Byte1 기준 (40=P, 47=R, 46=N, 45=D)
+            // 디버그용: 값 확인
+            // Serial.print("GEAR raw = 0x"); Serial.println(raw_gear, HEX);
 
-          gear_update_from_byte1(raw_gear);
+            gear_update_from_byte1(raw_gear);
+          }
+          break;
         }
-        break;
-      }
 
       default:
         // 아직 안 쓰는 ID는 무시
@@ -856,12 +868,12 @@ void setup() {
   byte canResult = CAN0.begin(MCP_ANY, CAN_500KBPS, MCP_8MHZ);
   if (canResult == CAN_OK) {
     Serial.println("CAN init OK");
-    g_can_ok = true;  // ✅ CAN 사용 가능
-    CAN0.setMode(MCP_NORMAL);   // 실제 버스 참여 모드
+    g_can_ok = true;           // ✅ CAN 사용 가능
+    CAN0.setMode(MCP_NORMAL);  // 실제 버스 참여 모드
   } else {
     Serial.print("CAN init FAIL, code=");
     Serial.println(canResult);
-    g_can_ok = false;          // ✅ 실패 시에는 CAN 호출 건너뛴다
+    g_can_ok = false;  // ✅ 실패 시에는 CAN 호출 건너뛴다
   }
 
   pinMode(CAN_INT, INPUT);
@@ -883,7 +895,7 @@ void loop() {
   lv_timer_handler();
 
   if (g_ui_ready && g_can_ok) {
-    read_can_and_update_ui();   // 위에서 바꾼 버전
+    read_can_and_update_ui();  // 위에서 바꾼 버전
   }
 
   // ✅ OVERRIDE 점멸 처리
@@ -891,4 +903,3 @@ void loop() {
 
   delay(5);
 }
-
