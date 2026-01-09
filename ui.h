@@ -31,6 +31,7 @@ extern "C" {
 
 #include "ui_booting.h"
 #include "ui_normalday.h"
+#include "ui_sportsmode.h"
 
 ///////////////////// VARIABLES ////////////////////
 

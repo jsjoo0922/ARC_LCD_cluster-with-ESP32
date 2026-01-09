@@ -37,6 +37,7 @@ void ui_init(void)
     lv_disp_set_theme(dispp, theme);
     ui_booting_screen_init();
     ui_normalday_screen_init();
+    ui_sportsmode_screen_init();
     ui____initial_actions0 = lv_obj_create(NULL);
     lv_disp_load_scr(ui_booting);
 }
@@ -45,4 +46,5 @@ void ui_destroy(void)
 {
     ui_booting_screen_destroy();
     ui_normalday_screen_destroy();
+    ui_sportsmode_screen_destroy();
 }
