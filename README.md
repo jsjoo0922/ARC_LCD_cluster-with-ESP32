@@ -36,6 +36,8 @@ LVGL ui 엔진을 이용하였습니다.
   6. 어댑티브 크루즈 동작화면 (전방차량 유무와 차간거리, 세팅속도)
   7. 나이트모드 --> (개발중)
   8. 스포츠모드 --> (ui스크린 구현완료)
+![KakaoTalk_20260109_160729640-ezgif com-video-to-gif-converter (1)](https://github.com/user-attachments/assets/0147e518-0e0e-47d1-993a-f31694beb3fd)
+
 
 
 *현재까지 발견된 문제
