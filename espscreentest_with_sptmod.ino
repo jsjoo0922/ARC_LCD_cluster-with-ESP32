@@ -76,12 +76,12 @@ static unsigned long g_scc_override_ms = 0;  // 마지막 토글 시각
 
 static scc_state_t g_scc_state = SCC_OFF;
 // ===== Runtime values (CAN으로 계속 갱신될 값 캐시) =====
-static int  g_speed_kph      = 0;
-static int  g_coolant_c      = 85;
-
-static int  g_scc_set_kph    = 120;
-static int  g_scc_dist_level = 2;      // 1~3
-static bool g_scc_lead_car   = false;  // false=전방차량 없음, true=있음
+static int g_speed_kph = 0;
+static int g_coolant_c = 85;
+static int g_rpm = 0;
+static int g_scc_set_kph = 120;
+static int g_scc_dist_level = 2;     // 1~3
+static bool g_scc_lead_car = false;  // false=전방차량 없음, true=있음
 
 
 
@@ -392,6 +392,22 @@ static void set_coolant(int coolant_c) {
   if (ui_sptcoolantgauge) lv_obj_set_style_arc_color(ui_sptcoolantgauge, col, LV_PART_INDICATOR | LV_STATE_DEFAULT);  // ✅
 }
 
+// ================= spt RPM UI =================
+static void set_rpm(int rpm) {
+  rpm = clampi(rpm, 0, 8000);
+
+  // 스포츠 RPM 아크
+  if (ui_sptRPMgauge) lv_arc_set_value(ui_sptRPMgauge, rpm);
+
+  // 텍스트는 "RPM" 라벨을 유지하면서 숫자도 같이 표시 (선택)
+  if (ui_sptrpmtext) {
+    char t[20];
+    snprintf(t, sizeof(t), "RPM\n%d", rpm);
+    lv_label_set_text(ui_sptrpmtext, t);
+  }
+}
+
+
 
 // ================= SCC: set speed value sync =================
 // 사용자의 정정 요구 반영: 라벨 위치 이동 X, 값만 동기화
@@ -624,8 +640,8 @@ static const char *gear_text_from_raw(uint8_t raw) {
 static void gear_update_from_byte1(uint8_t raw) {
   const char *gear_text = gear_text_from_raw(raw);
 
-  if (ui_gearlabel)     lv_label_set_text(ui_gearlabel, gear_text);
-  if (ui_sptgearlabel)  lv_label_set_text(ui_sptgearlabel, gear_text);
+  if (ui_gearlabel) lv_label_set_text(ui_gearlabel, gear_text);
+  if (ui_sptgearlabel) lv_label_set_text(ui_sptgearlabel, gear_text);
 }
 
 
@@ -796,22 +812,29 @@ static void read_can_and_update_ui() {
       // ===== 0x0A0: 속도 + 냉각수 (최유력 후보) =====
       case 0x0A0:
         {
-          // 속도: B4 → km/h (이미 1세대에서 검증했던 바이트)
+          // RPM: Byte2, Byte3 little-endian, rpm = raw/4
+          if (len >= 4) {
+            uint16_t rpm_raw = ((uint16_t)buf[3] << 8) | buf[2];
+            g_rpm = (int)(rpm_raw / 4);
+            set_rpm(g_rpm);
+          }
+
+          // 속도
           if (len >= 5) {
-            uint8_t raw_speed = buf[4];  // B4
+            uint8_t raw_speed = buf[4];
             g_speed_kph = raw_speed;
             set_speed(g_speed_kph);
           }
 
-          // 냉각수: Byte1 - 40 (확정 식)
+          // 냉각수
           if (len >= 2) {
-            uint8_t raw_clt = buf[1];           // Byte1
-            int coolant_c = (int)raw_clt - 40;  // CLT[°C] = raw - 40
-            g_coolant_c = coolant_c;
+            uint8_t raw_clt = buf[1];
+            g_coolant_c = (int)raw_clt - 40;
             set_coolant(g_coolant_c);
           }
           break;
         }
+
 
         // ===== 0x47F: AutoHold 상태 =====
       case 0x47F:
@@ -834,7 +857,7 @@ static void read_can_and_update_ui() {
 
 
       // ===== 0x1087: PRND 기어 위치 =====
-      case 0x1087:
+      case 0x43F:
         {
           if (len >= 2) {
             uint8_t raw_gear = buf[1];  // Byte1 기준 (40=P, 47=R, 46=N, 45=D)
