@@ -14,6 +14,10 @@ lv_obj_t * ui_sptrpmtext = NULL;
 lv_obj_t * ui_sptcoolanttext = NULL;
 lv_obj_t * ui_sptautoholdindicator = NULL;
 lv_obj_t * ui_sptgearlabel = NULL;
+lv_obj_t * ui_sptSCCsettext = NULL;
+lv_obj_t * ui_sptSCCsetspeedlabel = NULL;
+lv_obj_t * ui_sptSCCkmhtext = NULL;
+lv_obj_t * ui_sptSCCimg = NULL;
 // event funtions
 
 // build funtions
@@ -130,6 +134,48 @@ void ui_sportsmode_screen_init(void)
     lv_obj_set_style_text_opa(ui_sptgearlabel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(ui_sptgearlabel, &lv_font_montserrat_30, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    ui_sptSCCsettext = lv_label_create(ui_sportsmode);
+    lv_obj_set_width(ui_sptSCCsettext, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_sptSCCsettext, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_sptSCCsettext, 0);
+    lv_obj_set_y(ui_sptSCCsettext, -91);
+    lv_obj_set_align(ui_sptSCCsettext, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_sptSCCsettext, "SET");
+    lv_obj_set_style_text_color(ui_sptSCCsettext, lv_color_hex(0x808080), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_sptSCCsettext, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_sptSCCsettext, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_sptSCCsetspeedlabel = lv_label_create(ui_sportsmode);
+    lv_obj_set_width(ui_sptSCCsetspeedlabel, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_sptSCCsetspeedlabel, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_sptSCCsetspeedlabel, 0);
+    lv_obj_set_y(ui_sptSCCsetspeedlabel, -72);
+    lv_obj_set_align(ui_sptSCCsetspeedlabel, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_sptSCCsetspeedlabel, "120");
+    lv_obj_set_style_text_color(ui_sptSCCsetspeedlabel, lv_color_hex(0x808080), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_sptSCCsetspeedlabel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_sptSCCsetspeedlabel, &lv_font_montserrat_20, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_sptSCCkmhtext = lv_label_create(ui_sportsmode);
+    lv_obj_set_width(ui_sptSCCkmhtext, LV_SIZE_CONTENT);   /// 1
+    lv_obj_set_height(ui_sptSCCkmhtext, LV_SIZE_CONTENT);    /// 1
+    lv_obj_set_x(ui_sptSCCkmhtext, 35);
+    lv_obj_set_y(ui_sptSCCkmhtext, -72);
+    lv_obj_set_align(ui_sptSCCkmhtext, LV_ALIGN_CENTER);
+    lv_label_set_text(ui_sptSCCkmhtext, "Km/h");
+    lv_obj_set_style_text_color(ui_sptSCCkmhtext, lv_color_hex(0x808080), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(ui_sptSCCkmhtext, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(ui_sptSCCkmhtext, &lv_font_montserrat_12, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    ui_sptSCCimg = lv_img_create(ui_sportsmode);
+    lv_obj_set_width(ui_sptSCCimg, 117);
+    lv_obj_set_height(ui_sptSCCimg, 28);
+    lv_obj_set_x(ui_sptSCCimg, 0);
+    lv_obj_set_y(ui_sptSCCimg, -40);
+    lv_obj_set_align(ui_sptSCCimg, LV_ALIGN_CENTER);
+    lv_obj_add_flag(ui_sptSCCimg, LV_OBJ_FLAG_ADV_HITTEST);     /// Flags
+    lv_obj_clear_flag(ui_sptSCCimg, LV_OBJ_FLAG_SCROLLABLE);      /// Flags
+
 }
 
 void ui_sportsmode_screen_destroy(void)
@@ -146,5 +192,9 @@ void ui_sportsmode_screen_destroy(void)
     ui_sptcoolanttext = NULL;
     ui_sptautoholdindicator = NULL;
     ui_sptgearlabel = NULL;
+    ui_sptSCCsettext = NULL;
+    ui_sptSCCsetspeedlabel = NULL;
+    ui_sptSCCkmhtext = NULL;
+    ui_sptSCCimg = NULL;
 
 }

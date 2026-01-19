@@ -4,6 +4,7 @@ SET(SOURCES ui_comp_arcspeed.c
     ui_comp.c
     ui_booting.c
     ui_normalday.c
+    ui_sportsmode.c
     ui.c
     ui_comp_hook.c
     ui_helpers.c)

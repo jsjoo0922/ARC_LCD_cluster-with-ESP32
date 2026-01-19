@@ -22,6 +22,10 @@ extern lv_obj_t * ui_sptrpmtext;
 extern lv_obj_t * ui_sptcoolanttext;
 extern lv_obj_t * ui_sptautoholdindicator;
 extern lv_obj_t * ui_sptgearlabel;
+extern lv_obj_t * ui_sptSCCsettext;
+extern lv_obj_t * ui_sptSCCsetspeedlabel;
+extern lv_obj_t * ui_sptSCCkmhtext;
+extern lv_obj_t * ui_sptSCCimg;
 // CUSTOM VARIABLES
 
 #ifdef __cplusplus

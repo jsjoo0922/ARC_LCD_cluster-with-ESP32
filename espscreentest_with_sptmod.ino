@@ -14,9 +14,15 @@ extern "C" {
 #include "ui_booting.h"
 #include "ui_img_coolant.h"
 #include "ui_img_scc.h"
+#include "spt_ui_img_scc.h"
+
 #ifdef __cplusplus
 }
 #endif
+
+//scctestloop
+
+
 
 // ===== MCP2515 핀 정의 (앞에서 잡은 배선 기준) =====
 #define CAN_CS 5         // MCP2515 CS
@@ -43,7 +49,8 @@ MCP_CAN CAN0(CAN_CS);
 TFT_eSPI tft = TFT_eSPI();
 
 static lv_disp_draw_buf_t draw_buf;
-static lv_color_t buf1[240 * 20];
+static lv_color_t buf1[240 * 40];
+static lv_color_t buf2[240 * 40];
 
 static uint32_t last_ms = 0;
 
@@ -396,16 +403,16 @@ static void set_coolant(int coolant_c) {
 static void set_rpm(int rpm) {
   rpm = clampi(rpm, 0, 8000);
 
-  // 스포츠 RPM 아크
   if (ui_sptRPMgauge) lv_arc_set_value(ui_sptRPMgauge, rpm);
 
-  // 텍스트는 "RPM" 라벨을 유지하면서 숫자도 같이 표시 (선택)
+  // ✅ RPM 텍스트 제거: 숫자만 1줄로 표시
   if (ui_sptrpmtext) {
-    char t[20];
-    snprintf(t, sizeof(t), "RPM\n%d", rpm);
+    char t[8];
+    snprintf(t, sizeof(t), "%d", rpm);
     lv_label_set_text(ui_sptrpmtext, t);
   }
 }
+
 
 
 
@@ -422,16 +429,29 @@ static void scc_update_set_speed(int set_kph) {
   char buf[8];
   snprintf(buf, sizeof(buf), "%d", set_kph);
   lv_label_set_text(ui_SCCsetspeedlabel, buf);
+
+  if (ui_sptSCCsetspeedlabel) {
+    char b[8];
+    snprintf(b, sizeof(b), "%d", set_kph);
+    lv_label_set_text(ui_sptSCCsetspeedlabel, b);
+  }
 }
 
 // ================= SCC: text color (arc 제외) =================
+static lv_color_t scc_ready_color(void) {
+  // sports 배경이 어두우니 밝게
+  if (g_mode == MODE_SPORTS) return lv_color_hex(0xC0C0C0);  // 연회색(권장)
+  return lv_color_hex(0x000000);                             // normal READY(기존 유지)
+}
+
+
 static void scc_set_text_color_by_state(scc_state_t state) {
   lv_color_t color;
 
   switch (state) {
     case SCC_READY:
       // READY: 검정
-      color = lv_color_hex(0x000000);
+      color = scc_ready_color();
       break;
 
     case SCC_ON:
@@ -460,6 +480,17 @@ static void scc_set_text_color_by_state(scc_state_t state) {
   }
   if (ui_SCCkmhtext) {
     lv_obj_set_style_text_color(ui_SCCkmhtext, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+
+  // ✅ sports SCC text color도 같이 적용
+  if (ui_sptSCCsettext) {
+    lv_obj_set_style_text_color(ui_sptSCCsettext, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+  if (ui_sptSCCsetspeedlabel) {
+    lv_obj_set_style_text_color(ui_sptSCCsetspeedlabel, color, LV_PART_MAIN | LV_STATE_DEFAULT);
+  }
+  if (ui_sptSCCkmhtext) {
+    lv_obj_set_style_text_color(ui_sptSCCkmhtext, color, LV_PART_MAIN | LV_STATE_DEFAULT);
   }
 }
 
@@ -527,6 +558,21 @@ static const lv_img_dsc_t *SCC_IMG[2][2][3] = {
   }
 };
 
+// sports SCC: READY/ON(2) x leadcar(2) x dist(3)
+static const lv_img_dsc_t *SPT_SCC_IMG[2][2][3] = {
+  // READY (회색)
+  {
+    { &spt_ui_img_scc_rdy_car0_d1, &spt_ui_img_scc_rdy_car0_d2, &spt_ui_img_scc_rdy_car0_d3 },
+    { &spt_ui_img_scc_rdy_car1_d1, &spt_ui_img_scc_rdy_car1_d2, &spt_ui_img_scc_rdy_car1_d3 },
+  },
+  // ON (초록)
+  {
+    { &spt_ui_img_scc_on_car0_d1, &spt_ui_img_scc_on_car0_d2, &spt_ui_img_scc_on_car0_d3 },
+    { &spt_ui_img_scc_on_car1_d1, &spt_ui_img_scc_on_car1_d2, &spt_ui_img_scc_on_car1_d3 },
+  }
+};
+
+
 // SCC 상태/거리/전방차량에 맞춰 ui_SCCimg 갱신
 static void scc_update_image(void) {
   if (!ui_SCCimg) return;
@@ -545,6 +591,28 @@ static void scc_update_image(void) {
   const lv_img_dsc_t *img = SCC_IMG[color_idx][car_idx][dist_idx];
   lv_img_set_src(ui_SCCimg, img);
 }
+
+static void spt_scc_update_image(void) {
+  if (!ui_sptSCCimg) return;
+
+  // SCC OFF면 숨김
+  if (g_scc_state == SCC_OFF) {
+    lv_obj_add_flag(ui_sptSCCimg, LV_OBJ_FLAG_HIDDEN);
+    return;
+  }
+
+  // READY/ON이면 표시
+  lv_obj_clear_flag(ui_sptSCCimg, LV_OBJ_FLAG_HIDDEN);
+
+  // READY/LS_CANCEL => 0(회색), ON/OVERRIDE => 1(초록)
+  int color_idx = (g_scc_state == SCC_ON || g_scc_state == SCC_OVERRIDE) ? 1 : 0;
+
+  int car_idx = g_scc_lead_car ? 1 : 0;               // 0=없음, 1=있음
+  int dist_idx = clampi(g_scc_dist_level, 1, 3) - 1;  // 0~2
+
+  lv_img_set_src(ui_sptSCCimg, SPT_SCC_IMG[color_idx][car_idx][dist_idx]);
+}
+
 
 static void scc_set_text_blink_visible(bool visible) {
   if (ui_SCCsettext) {
@@ -584,38 +652,37 @@ static void scc_override_blink_task(void) {
 
 
 // ================= Main text layout by SCC state =================
-static void apply_main_text_layout_by_scc_state(scc_state_t state) {
+// (새로 추가) 애니메이션 없이 즉시 레이아웃 동기화(translate만 사용)
+static void sync_main_text_layout_instant(bool to_scc) {
   if (!ui_speedlabel || !ui_kmhtext || !ui_autoholdindicator) return;
 
-  bool scc_layout = (state == SCC_READY || state == SCC_ON || state == SCC_OVERRIDE || state == SCC_LS_CANCEL);
+  // pos는 건드리지 않는다! (SquareLine 기준 좌표 유지)
+  if (to_scc) {
+    set_main_text_fonts_scc();
 
-  if (scc_layout) {
-    // ===== READY/ON 공통 레이아웃 (사용자 기록값) =====
-    lv_obj_set_style_text_font(ui_speedlabel, &lv_font_montserrat_32, LV_PART_MAIN);
-    lv_obj_set_pos(ui_speedlabel, 0, 80);
+    lv_obj_set_style_translate_x(ui_speedlabel, SPD_TX_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_speedlabel, SPD_TY_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_text_font(ui_kmhtext, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_set_pos(ui_kmhtext, 0, 105);
+    lv_obj_set_style_translate_x(ui_kmhtext, KMH_TX_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_kmhtext, KMH_TY_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_text_font(ui_autoholdindicator, &lv_font_montserrat_8, LV_PART_MAIN);
-    lv_obj_set_pos(ui_autoholdindicator, 46, 80);
+    lv_obj_set_style_translate_x(ui_autoholdindicator, AH_TX_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_autoholdindicator, AH_TY_SCC, LV_PART_MAIN | LV_STATE_DEFAULT);
 
   } else {
-    // ===== NORMAL(OFF) 레이아웃도 "수동 고정값"으로 명시 =====
-    // 아래 값들은 SquareLine에서 NORMAL 상태 좌표/폰트 그대로 적어주면 됨.
-    // (여기가 핵심: 저장값(spd_x0...) 안 쓰고 확정값으로 복귀)
+    set_main_text_fonts_normal();
 
-    // 예시: 반드시 사용자가 가진 NORMAL 값으로 교체
-    lv_obj_set_style_text_font(ui_speedlabel, &lv_font_montserrat_48, LV_PART_MAIN);
-    lv_obj_set_pos(ui_speedlabel, SPD_NORMAL_X, SPD_NORMAL_Y);
+    lv_obj_set_style_translate_x(ui_speedlabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_speedlabel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_text_font(ui_kmhtext, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_set_pos(ui_kmhtext, KMH_NORMAL_X, KMH_NORMAL_Y);
+    lv_obj_set_style_translate_x(ui_kmhtext, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_kmhtext, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_set_style_text_font(ui_autoholdindicator, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_set_pos(ui_autoholdindicator, AH_NORMAL_X, AH_NORMAL_Y);
+    lv_obj_set_style_translate_x(ui_autoholdindicator, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_translate_y(ui_autoholdindicator, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
   }
 }
+
 
 // ================= Gear (PRND) 표시 =================
 
@@ -668,22 +735,45 @@ static void set_scc_state(scc_state_t new_state) {
 
   // UI 준비 전(부팅 중)에는 즉시 반영
   if (!g_ui_ready) {
-    scc_set_visible(g_scc_state);
-    apply_main_text_layout_by_scc_state(g_scc_state);
 
-    if (g_scc_state != SCC_OFF) {
-      scc_update_set_speed(g_scc_set_kph);
-    }
     return;
   }
 
+  bool to_scc = (g_scc_state != SCC_OFF);  // 또는 is_scc_layout_state(g_scc_state)
+
+  scc_set_visible(g_scc_state);
+  sync_main_text_layout_instant(to_scc);
+
+  scc_set_text_color_by_state(g_scc_state);
+
+  if (g_scc_state != SCC_OFF) {
+    scc_update_set_speed(g_scc_set_kph);
+    scc_update_image();
+    spt_scc_update_image();
+  }
+
+
   // Normal <-> SCC 전환만 애니메이션
   if (prev_layout != new_layout) {
-    transition_to_scc_layout(new_layout);
+    // normal 화면이 실제로 떠 있을 때만 애니메이션
+    bool normal_active = (g_mode == MODE_NORMAL) && (lv_scr_act() == ui_normalday);
+
+    if (normal_active) {
+      transition_to_scc_layout(new_layout);  // 애니메이션
+    } else {
+      sync_main_text_layout_instant(new_layout);  // 즉시 반영
+      scc_set_visible(g_scc_state);               // coolant/gear/scc 숨김 상태 즉시 동기화
+    }
   } else {
-    // 같은 레이아웃 내 변화(READY<->ON 등)는 즉시 반영
+    // READY<->ON 같은 “레이아웃 변화 없는” 상태는 위치 건드리지 말고
+    // visible + 색 + 이미지 + set speed만 갱신
     scc_set_visible(g_scc_state);
-    apply_main_text_layout_by_scc_state(g_scc_state);
+  }
+
+
+
+  if (g_mode == MODE_SPORTS) {
+    spt_set_scc_group_visible(scc_is_visible_state());
   }
 
   // SCC 표시 중이면 set speed 동기화
@@ -692,26 +782,66 @@ static void set_scc_state(scc_state_t new_state) {
   }
 }
 
+
 // ===== Forward declarations (load_screen_by_mode에서 사용하므로 위에 필요) =====
 static void set_speed(int kph);
 static void set_coolant(int coolant_c);
 
 
+static void sports_post_load_cb(lv_timer_t *t) {
+  // 레이아웃 확정
+  if (ui_sportsmode) lv_obj_update_layout(ui_sportsmode);
+  lv_refr_now(NULL);
 
+  // SCC OFF면 숨김, READY/ON이면 표시
+  spt_set_scc_group_visible(scc_is_visible_state());
 
+  lv_timer_del(t);
+}
 
 static void load_screen_by_mode(screen_mode_t m) {
   lv_obj_t *target = (m == MODE_SPORTS) ? ui_sportsmode : ui_normalday;
-
-  // 이미 그 화면이면 아무것도 안 함
   if (lv_scr_act() == target) return;
+
+  if (ui_speedlabel) {
+    lv_anim_del(ui_speedlabel, (lv_anim_exec_xcb_t)anim_exec_set_tx);
+    lv_anim_del(ui_speedlabel, (lv_anim_exec_xcb_t)anim_exec_set_ty);
+  }
+  if (ui_kmhtext) {
+    lv_anim_del(ui_kmhtext, (lv_anim_exec_xcb_t)anim_exec_set_tx);
+    lv_anim_del(ui_kmhtext, (lv_anim_exec_xcb_t)anim_exec_set_ty);
+  }
+  if (ui_autoholdindicator) {
+    lv_anim_del(ui_autoholdindicator, (lv_anim_exec_xcb_t)anim_exec_set_tx);
+    lv_anim_del(ui_autoholdindicator, (lv_anim_exec_xcb_t)anim_exec_set_ty);
+  }
+
 
   lv_scr_load_anim(target, LV_SCR_LOAD_ANIM_FADE_IN, 180, 0, false);
 
-  // 전환 직후 현재 값 재출력(두 화면에 동시에 반영되도록 아래 4단계에서 set_* 확장할 예정)
   set_speed(g_speed_kph);
   set_coolant(g_coolant_c);
+
+  if (m == MODE_NORMAL) {
+    // 1) 무조건 OFF(기본)로 리셋: 중앙 원점/큰 폰트/쿨런트 보이기
+    sync_main_text_layout_instant(false);
+    scc_set_visible(SCC_OFF);  // SCC 그룹 숨기고 coolant/gear 복구
+
+    // 2) 실제 SCC가 켜져 있다면, OFF에서 다시 SCC 레이아웃으로 내려가는 애니메이션을 재생
+    if (g_scc_state != SCC_OFF) {
+      // 색/이미지/설정속도 먼저 맞춤
+      scc_set_text_color_by_state(g_scc_state);
+      scc_update_image();
+      scc_update_set_speed(g_scc_set_kph);
+
+      transition_to_scc_layout(true);
+    }
+  }
+
+  scc_set_text_color_by_state(g_scc_state);
 }
+
+
 
 // ================= Boot animation timer =================
 static void boot_timer_cb(lv_timer_t *t) {
@@ -749,6 +879,11 @@ static void boot_timer_cb(lv_timer_t *t) {
   }
 }
 
+static lv_color_t autohold_standby_color(void) {
+  if (g_mode == MODE_SPORTS) return lv_color_hex(0xC0C0C0);  // 연회색
+  return lv_color_hex(0x000000);                             // 노말 대기(기존)
+}
+
 static void set_autohold_indicator_common(lv_obj_t *label, bool ah_on, bool ah_active) {
   if (!label) return;
 
@@ -759,9 +894,10 @@ static void set_autohold_indicator_common(lv_obj_t *label, bool ah_on, bool ah_a
 
   lv_label_set_text(label, "AUTO\nHOLD");
 
-  lv_color_t col = ah_active ? lv_color_hex(0x00C040) : lv_color_hex(0x000000);
+  lv_color_t col = ah_active ? lv_color_hex(0x00C040) : autohold_standby_color();
   lv_obj_set_style_text_color(label, col, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
+
 
 
 // ================= CAN 수신 → UI 반영 =================
@@ -806,6 +942,7 @@ static void read_can_and_update_ui() {
 
           // 거리/전방차량에 맞춰 이미지 갱신
           scc_update_image();
+          spt_scc_update_image();
           break;
         }
 
@@ -876,20 +1013,35 @@ static void read_can_and_update_ui() {
   }
 }
 
-static void set_autohold_labels(bool ah_on, bool ah_active) {
-  // 텍스트
-  const char *txt = ah_on ? "AUTO\nHOLD" : "";
 
-  if (ui_autoholdindicator) lv_label_set_text(ui_autoholdindicator, txt);
-  if (ui_sptautoholdindicator) lv_label_set_text(ui_sptautoholdindicator, txt);
+static void spt_set_scc_group_visible(bool vis) {
+  lv_obj_t *objs[] = {
+    ui_sptSCCsettext,
+    ui_sptSCCsetspeedlabel,
+    ui_sptSCCkmhtext,
+    ui_sptSCCimg
+  };
 
-  // 색상
-  if (ah_on) {
-    lv_color_t col = ah_active ? lv_color_hex(0x00C040) : lv_color_hex(0x000000);
-    if (ui_autoholdindicator) lv_obj_set_style_text_color(ui_autoholdindicator, col, LV_PART_MAIN | LV_STATE_DEFAULT);
-    if (ui_sptautoholdindicator) lv_obj_set_style_text_color(ui_sptautoholdindicator, col, LV_PART_MAIN | LV_STATE_DEFAULT);
+  for (size_t i = 0; i < sizeof(objs) / sizeof(objs[0]); i++) {
+    if (!objs[i]) continue;
+    if (vis) lv_obj_clear_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(objs[i], LV_OBJ_FLAG_HIDDEN);
   }
+
+  // 글자 가림 방지: SCC 이미지는 뒤로, 텍스트는 앞으로 (선택)
+  if (ui_sptSCCimg) lv_obj_move_background(ui_sptSCCimg);
+  if (ui_sptSCCsettext) lv_obj_move_foreground(ui_sptSCCsettext);
+  if (ui_sptSCCsetspeedlabel) lv_obj_move_foreground(ui_sptSCCsetspeedlabel);
+  if (ui_sptSCCkmhtext) lv_obj_move_foreground(ui_sptSCCkmhtext);
 }
+
+static bool scc_is_visible_state(void) {
+  return (g_scc_state == SCC_READY || g_scc_state == SCC_ON);
+}
+
+
+
+
 
 
 
@@ -905,7 +1057,7 @@ void setup() {
   // ===== LVGL 초기화 =====
   lv_init();
 
-  lv_disp_draw_buf_init(&draw_buf, buf1, NULL, 240 * 20);
+  lv_disp_draw_buf_init(&draw_buf, buf1, buf2, 240 * 40);
 
   static lv_disp_drv_t disp_drv;
   lv_disp_drv_init(&disp_drv);
@@ -976,6 +1128,8 @@ static void poll_mode_button(void) {
 
       g_mode = (g_mode == MODE_NORMAL) ? MODE_SPORTS : MODE_NORMAL;
       load_screen_by_mode(g_mode);
+      //scctestloop
+      spt_scc_update_image();
     }
   }
 }
