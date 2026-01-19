@@ -1,6 +1,8 @@
 ARC_LCD_ base mini cluster for HYUNDAI GENESIS 2008~2013
 UI based LVGL, ESP32 MCU based.
 
+now latest version : V1.3.0
+
 제 차량에는 어댑티브 스마트 크루즈 컨트롤이 있습니다.
 작동중일 시에 계기판에 작동상황을 이미지로 함께 보여주죠.
 ![genesis_scc_cluster](https://github.com/user-attachments/assets/fabd4b33-eb65-4711-8534-eb37cedda82c)
@@ -43,4 +45,3 @@ LVGL ui 엔진을 이용하였습니다.
 *현재까지 발견된 문제
   1. 고속 일 수록 속도계의 편차가 있음
   2. 모듈이 너무 큼
-  3. 스포츠모드에서 scc관련 아이콘들 미완성으로 scc관련 시각화 구현 불가
